@@ -907,7 +907,6 @@ pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int tty_open(const char* tty_path){
   int fd = open(tty_path, O_RDWR | O_NOCTTY | O_NONBLOCK);
-  dprintf("tty_open %s, fd: %d\r\n", tty_path, fd);
   if(fd >= 0){
     struct termios settings;
     memset(&settings, 0, sizeof(settings));
@@ -917,6 +916,8 @@ static int tty_open(const char* tty_path){
     tcsetattr(fd, TCSANOW, &settings);
     tcflush(fd, TCIOFLUSH);
   }
+  else dprintf("tty_path error: %s\r\n", strerror(errno));
+
   return fd;
 }
 
@@ -948,11 +949,16 @@ int main(int argc, char *argv[]){
     dprintf("tty_path: %s\r\n", tty_path);
     dprintf("modem_name: %s\r\n", modem_name);
     dprintf("firmware_path: %s\r\n", firmware_path);
-    int fd = tty_open(tty_path);
+
+    int fd;
+    while((fd = tty_open(tty_path)) < 0) sleep(1);
     FILE* fw_fp = fopen(firmware_path, "rb");
-    if(fd >= 0 && fw_fp) dloader_main(fd, fw_fp, modem_name);
-    if(fw_fp)fclose(fw_fp);
-    if(fd >= 0) close(fd);
+    if(fw_fp){
+        dloader_main(fd, fw_fp, modem_name);
+        fclose(fw_fp);
+    }
+    else dprintf("firmware_path err: %s\r\n", strerror(errno));
+    close(fd);
     if(log_fp != stdout) fclose(log_fp);
 }
 #endif
