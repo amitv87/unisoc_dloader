@@ -6,7 +6,7 @@ BUILD_DIR := $(if $(BUILD_DIR),$(BUILD_DIR),.build)
 INC_FLAGS := -MMD -MP
 
 rwildcard = $(wildcard $1$2) $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2))
-SRCS := $(call rwildcard,./,*.c)
+SRCS := $(call rwildcard,,*.c)
 
 OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)
 DEPS := $(OBJS:.o=.d)
