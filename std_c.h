@@ -69,5 +69,14 @@ extern char log_buf[];
     pthread_mutex_unlock(&log_mutex); \
 } while(0);
 
+#define cprintf(fmt, args...) do { \
+    int log_size = 0; \
+    pthread_mutex_lock(&log_mutex); \
+    log_size = snprintf(log_buf, 1024, fmt, ##args); \
+    if (log_fp){fwrite(log_buf, log_size, 1, log_fp); fflush(log_fp);}\
+    if (log_fp != stdout){fwrite(log_buf, log_size, 1, stdout); fflush(stdout);}\
+    pthread_mutex_unlock(&log_mutex); \
+} while(0);
+
 //#define EC200T_SHINCO "/data/update/meig_linux_update_for_arm/updatelog"
 #endif

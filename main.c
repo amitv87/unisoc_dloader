@@ -530,6 +530,8 @@ static int bsl_flash_id(pac_ctx_t *ctx, Scheme_t *File) {
     bsl_cmd_add_crc16(bsl_req, use_crc16BootCode);
     bsl_exec(bsl_send_cmd_wait_ack(ctx, bsl_req, 0, 0));
 
+    dprintf("\t%c", '>');
+
     curSize = 0;
     while (curSize < fileSize)
     {
@@ -570,15 +572,18 @@ static int bsl_flash_id(pac_ctx_t *ctx, Scheme_t *File) {
         if (ret <= 0) break;
         if (nv_crc && (curSize == 0))
             *((uint16_t *)(bsl_req->data)) = htobe16(crc16);
-	if ((ret&1) == 1)
-		bsl_req->data[ret++] = 0;
+        if ((ret&1) == 1)
+            bsl_req->data[ret++] = 0;
 
         bsl_req->len = htobe16(ret);
         bsl_cmd_add_crc16(bsl_req, use_crc16BootCode);
 
         curSize += ret;
+        cprintf("%c", '>');
         bsl_exec(bsl_send_cmd_wait_ack(ctx, bsl_req, 0, 0));
     }
+
+    cprintf("\r\n");
 
     if (File->backup_fp) {
         fclose(File->backup_fp);
