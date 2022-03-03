@@ -865,7 +865,7 @@ static int  test_bsl(pac_ctx_t *ctx ) {
 }
 
 static pac_ctx_t g_pac_ctx;
-int dloader_main(int usbfd, FILE *fw_fp, const char *modem_name)
+int dloader_main(int usbfd, FILE *fw_fp)
 {
     pac_ctx_t *ctx = &g_pac_ctx;
     int ret = -1;
@@ -875,19 +875,19 @@ int dloader_main(int usbfd, FILE *fw_fp, const char *modem_name)
     ctx->pdl_rsp = (PDL_CMD_T *)ctx->bsl_rsp;
     ctx->usbfd = usbfd;
 
-    if (!strcmp(modem_name, "RG500U")) {
-        udx710 = 1;
+    if (pac_parser(ctx, fw_fp)){
+        dprintf("invalid firmware file\r\n");
+        goto out;
     }
-    else if (!strcmp(modem_name, "EC200U")) {
-        uix8910 = 1;
-    }
-    else {
-        dprintf("un-support dev %s\n", modem_name);
-        return -1;
+    if(strstr(ctx->pac_hdr.szPrdName, "710") || strstr(ctx->pac_hdr.szPrdVersion, "710")) udx710 = 1;
+    else if(strstr(ctx->pac_hdr.szPrdName, "8910") || strstr(ctx->pac_hdr.szPrdVersion, "8910")) uix8910 = 1;
+    else{
+        ret = -2;
+        dprintf("invalid modem\r\n");
+        goto out;
     }
 
-    if (pac_parser(ctx, fw_fp))
-        goto out;
+    dprintf("udx710: %d, uix8910: %d\r\n", udx710, uix8910);
 
     ret = test_bsl(ctx);
 out:
@@ -941,20 +941,19 @@ const char *get_time(void) {
 int main(int argc, char *argv[]){
     log_fp = stdout;
     // log_fp = fopen("./dloader.log", "wb");
-    if(argc < 4){
+    if(argc < 3){
         dprintf("Invalid args\r\n");
         return -1;
     }
-    const char* tty_path = argv[1], *modem_name = argv[2], *firmware_path = argv[3];
+    const char* tty_path = argv[1], *firmware_path = argv[2];
     dprintf("tty_path: %s\r\n", tty_path);
-    dprintf("modem_name: %s\r\n", modem_name);
     dprintf("firmware_path: %s\r\n", firmware_path);
 
     int fd;
     while((fd = tty_open(tty_path)) < 0) sleep(1);
     FILE* fw_fp = fopen(firmware_path, "rb");
     if(fw_fp){
-        dloader_main(fd, fw_fp, modem_name);
+        dloader_main(fd, fw_fp);
         fclose(fw_fp);
     }
     else dprintf("firmware_path err: %s\r\n", strerror(errno));
