@@ -49,7 +49,7 @@ static const BSL_CMD_NAME_T bsl_cmd_name[] = {
 
 static int use_crc16BootCode = 0;
 static size_t skip_7d = 0;
-
+static int last_resp = 0;
 
 extern int sendSync(int usbfd, const void *data, size_t len, int need_zlp){
     int rc;
@@ -423,7 +423,9 @@ int bsl_send_cmd_wait_ack(pac_ctx_t *ctx, BSL_CMD_T *bsl_req, uint16_t bsl_cmd, 
     bsl_rsp = bsl_read_cmd(ctx, timeout);
     if (bsl_rsp == NULL) return -1;
 
-    if (be16toh(bsl_rsp->cmd) != BSL_REP_ACK && be16toh(bsl_rsp->cmd) != BSL_REP_INCOMPATIBLE_PARTITION)
+    last_resp = be16toh(bsl_rsp->cmd);
+
+    if (last_resp != BSL_REP_ACK && last_resp != BSL_REP_DOWN_EARLY_END && be16toh(bsl_rsp->cmd) != BSL_REP_INCOMPATIBLE_PARTITION)
         return -1;
 
     return 0;
@@ -859,6 +861,7 @@ static int  test_bsl(pac_ctx_t *ctx ) {
         }
     }
 
+    if(last_resp != BSL_REP_DOWN_EARLY_END)
     bsl_exec(bsl_send_cmd_wait_ack(ctx, NULL, BSL_CMD_NORMAL_RESET, 0));
 
     return 0;
@@ -879,8 +882,12 @@ int dloader_main(int usbfd, FILE *fw_fp)
         dprintf("invalid firmware file\r\n");
         goto out;
     }
-    if(strstr(ctx->pac_hdr.szPrdName, "710") || strstr(ctx->pac_hdr.szPrdVersion, "710")) udx710 = 1;
-    else if(strstr(ctx->pac_hdr.szPrdName, "8910") || strstr(ctx->pac_hdr.szPrdVersion, "8910")) uix8910 = 1;
+
+    #define CHK_NAME(x) strstr((char*)ctx->pac_hdr.szPrdName, x)
+    #define CHK_VERSION(x) strstr((char*)ctx->pac_hdr.szPrdVersion, x)
+
+    if(CHK_NAME("710") || CHK_VERSION("710")) udx710 = 1;
+    else if(CHK_NAME("8910") || CHK_VERSION("8910")) uix8910 = 1;
     else{
         ret = -2;
         dprintf("invalid modem\r\n");
