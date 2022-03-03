@@ -1,9 +1,16 @@
 TARGET := dloader
-
 MKDIR_P = mkdir -p
+UNAME := $(shell uname)
 BUILD_DIR := $(if $(BUILD_DIR),$(BUILD_DIR),.build)
 
 INC_FLAGS := -MMD -MP
+COMPILE_FLAGS := -Os -g0
+
+ifeq ($(UNAME), Darwin)
+	LD_FLAGS := -Wl,-dead_strip
+else ifeq ($(UNAME), Linux)
+	LD_FLAGS := -Wl,-s -Wl,--gc-sections -Wl,--as-needed
+endif
 
 rwildcard = $(wildcard $1$2) $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2))
 SRCS := $(call rwildcard,,*.c)
@@ -13,7 +20,7 @@ DEPS := $(OBJS:.o=.d)
 
 $(BUILD_DIR)/$(TARGET): $(OBJS)
 	@echo "\033[92;1mLinking CXX executable $@\033[0m"
-	$(CC) $(LD_FLAGS) -o $@ $(OBJS) $(APP_LIBS) ${STD_LIBS}
+	$(CC) ${COMPILE_FLAGS} $(LD_FLAGS) -o $@ $(OBJS) $(APP_LIBS) ${STD_LIBS}
 	@echo Built target $@
 
 $(BUILD_DIR)/%.c.o: %.c
