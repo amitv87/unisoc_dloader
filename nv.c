@@ -3,28 +3,28 @@
 #include <sys/stat.h>
 #include "pac.h"
 
-#define MAX_NV_CORE_NAME	(16)
-#define INDEX_NV_ID		(0x0)
-#define PADDING_NV_ID	(0xFFFE)
+#define MAX_NV_CORE_NAME    (16)
+#define INDEX_NV_ID     (0x0)
+#define PADDING_NV_ID   (0xFFFE)
 
 #define MAX_NV 1024
-#define MAX_PADDING_SIZE	(512)
+#define MAX_PADDING_SIZE    (512)
 
-#define INDEX_MAGIC			(0x58444E49)  //INDX
-#define INDEX_HEADER_VER1	(0x0)
+#define INDEX_MAGIC         (0x58444E49)  //INDX
+#define INDEX_HEADER_VER1   (0x0)
 
 typedef struct _MULTI_CORE_NV_HEADER_T_
 {
     uint32_t dwMagic;
     uint16_t  wVersion;
-    uint16_t  wCountCore;	// the count of nv core
+    uint16_t  wCountCore;   // the count of nv core
 } MULTI_CORE_NV_HEADER_T,*PMULTI_CORE_NV_HEADER_PTR;
 
 typedef struct _NV_CORE_INFO_T_
 {
-    char szCoreName[MAX_NV_CORE_NAME];		// nv core name,
-    uint32_t  dwDataOffset;					// the offset of nv data
-    uint32_t  dwDataSize;						// the length of nv data
+    char szCoreName[MAX_NV_CORE_NAME];      // nv core name,
+    uint32_t  dwDataOffset;                 // the offset of nv data
+    uint32_t  dwDataSize;                       // the length of nv data
 } NV_CORE_INFO_T,*PNV_CORE_INFO_PTR;
 
 struct nv_item {
@@ -145,6 +145,7 @@ int MergeNormalNV(uint8_t *lpCodeSrc, uint32_t dwCodeSizeSrc, uint8_t * lpCodeDe
         }
         else
         {
+            src_list[s].dwLength = dst_list[d].dwLength;         //modify by Aaron 2022/05/19
             if (src_list[s].dwLength != dst_list[d].dwLength) {
                 printf("src_list[%d] {%04x, %04x} not match dst_list[%d] {%04x, %04x}\n",
                     s, src_list[s].wCurID, src_list[s].dwLength,
@@ -174,7 +175,7 @@ int IsMultiCore(const uint8_t *lpBuf, uint32_t dwSize, PMULTI_CORE_NV_HEADER_PTR
         if (INDEX_NV_ID == wID && wLen > sizeof(MULTI_CORE_NV_HEADER_T) )
         {
             *pCoreHeader = (MULTI_CORE_NV_HEADER_T*)(lpBuf + 8);
-            *pCoreItem	= (NV_CORE_INFO_T*)(lpBuf + 8 + sizeof(MULTI_CORE_NV_HEADER_T));
+            *pCoreItem  = (NV_CORE_INFO_T*)(lpBuf + 8 + sizeof(MULTI_CORE_NV_HEADER_T));
             if (INDEX_MAGIC == (*pCoreHeader)->dwMagic)
             {
                 if (INDEX_HEADER_VER1 == (*pCoreHeader)->wVersion)
@@ -196,9 +197,9 @@ int MergeNV(uint8_t * lpCodeSrc, uint32_t dwCodeSizeSrc, uint8_t * lpCodeDest, u
     int bMultiCoreSrc = 0;
     int bMultiCoreDest = 0;
     MULTI_CORE_NV_HEADER_T* pCoreHeaderSrc  = NULL;
-    NV_CORE_INFO_T* pCoreItemSrc			= NULL;
+    NV_CORE_INFO_T* pCoreItemSrc            = NULL;
     MULTI_CORE_NV_HEADER_T* pCoreHeaderDest = NULL;
-    NV_CORE_INFO_T* pCoreItemDest			= NULL;
+    NV_CORE_INFO_T* pCoreItemDest           = NULL;
     uint32_t i;
 
     bMultiCoreSrc = IsMultiCore(lpCodeSrc,dwCodeSizeSrc,&pCoreHeaderSrc,&pCoreItemSrc);
@@ -256,7 +257,7 @@ int MergeNV(uint8_t * lpCodeSrc, uint32_t dwCodeSizeSrc, uint8_t * lpCodeDest, u
 
 size_t nv_get_size(uint8_t * lpCodeSrc, uint32_t dwCodeSizeSrc) {
     MULTI_CORE_NV_HEADER_T* pCoreHeader  = NULL;
-    NV_CORE_INFO_T* pCoreItem			= NULL;
+    NV_CORE_INFO_T* pCoreItem           = NULL;
     int bMultiCore = 0;
     size_t maxSize = 0;
 
@@ -323,16 +324,16 @@ static void print_nv(uint8_t *lpCode, struct nv_item *nv_list, uint32_t nv_cnt) 
     for (j = 0; j < nv_cnt; j++) {
         struct nv_item *pNv = (struct nv_item *)(lpCode + nv_list[j].dwOffset);
 
-	//printf("{%x, %x}\n", nv_list[j].wCurID, nv_list[j].dwLength);
-	snprintf(nv_file, sizeof(nv_file), "%s/%x", nv_dir, nv_list[j].wCurID);
-	printf(" -> %s\n", nv_file);
-	nv_fp = fopen(nv_file, "wb");
-	if (nv_fp) {
-	    fwrite(pNv, 1, 4 + pNv->dwLength, nv_fp);
-	    fclose(nv_fp);
-	}
-	else
-	    printf("failed: fopen(%s). errno: %d (%s)\n", nv_file, errno, strerror(errno));
+    //printf("{%x, %x}\n", nv_list[j].wCurID, nv_list[j].dwLength);
+    snprintf(nv_file, sizeof(nv_file), "%s/%x", nv_dir, nv_list[j].wCurID);
+    printf(" -> %s\n", nv_file);
+    nv_fp = fopen(nv_file, "wb");
+    if (nv_fp) {
+        fwrite(pNv, 1, 4 + pNv->dwLength, nv_fp);
+        fclose(nv_fp);
+    }
+    else
+        printf("failed: fopen(%s). errno: %d (%s)\n", nv_file, errno, strerror(errno));
     }
 }
 
@@ -343,7 +344,7 @@ int main(int argc, char *argv[]) {
     int ret = -1;
     int bMultiCore = 0;
     MULTI_CORE_NV_HEADER_T* pCoreHeader = NULL;
-    NV_CORE_INFO_T* pCoreItem			= NULL;
+    NV_CORE_INFO_T* pCoreItem           = NULL;
     uint32_t i;
     const char *nv_file = "nr_fixnv1";
     uint32_t src_c;
