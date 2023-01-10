@@ -11,6 +11,17 @@ int q_erase_all = 0;
 int erase_all_once = 0;
 static uint32_t frame_sz = 0;
 
+static struct {
+    int* target;
+    const char* name;
+} chips[] = {
+    #define REG_CHIP(nm, tr) {.name = #nm, .target = &tr},
+    REG_CHIP(710, udx710)
+    REG_CHIP(8910, uix8910)
+    REG_CHIP(8850, uic8850)
+    REG_CHIP(8310, uic8310)
+};
+
 typedef struct {
     uint32_t cmd;
     const char *name;
@@ -1017,17 +1028,19 @@ int dloader_main(int usbfd, FILE *fw_fp)
     #define CHK_NAME(x) strstr((char*)ctx->pac_hdr.szPrdName, x)
     #define CHK_VERSION(x) strstr((char*)ctx->pac_hdr.szPrdVersion, x)
 
-    if(CHK_NAME("710") || CHK_VERSION("710")) udx710 = 1;
-    else if(CHK_NAME("8910") || CHK_VERSION("8910")) uix8910 = 1;
-    else if(CHK_NAME("8850") || CHK_VERSION("8850")) uic8850 = 1;
-    else if(CHK_NAME("8310") || CHK_VERSION("8310")) uic8310 = 1;
-    else{
+    int found = 0;
+    for(int i = 0; i < sizeof(chips)/sizeof(chips[0]); i++){
+        if(CHK_NAME(chips[i].name) || CHK_VERSION(chips[i].name)){
+            *(chips[i].target) = found = 1;
+            break;
+        }
+    }
+
+    if(!found){
         ret = -2;
         dprintf("invalid modem\r\n");
         goto out;
     }
-
-    dprintf("udx710: %d, uix8910: %d, uic8850: %d, uic8310: %d\r\n", udx710, uix8910, uic8850, uic8310);
 
     ret = test_bsl(ctx);
 out:
