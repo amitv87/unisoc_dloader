@@ -1,9 +1,14 @@
 #include "std_c.h"
 #include <getopt.h>
 #include "pac.h"
+#include <sys/utsname.h>
 
 int udx710 = 0; //RG500U
 int uix8910 = 0; //EC200U
+int uic8850 = 0; //EC800G
+int uic8310 = 0; //EC200D
+int q_erase_all = 0;
+int erase_all_once = 0;
 static uint32_t frame_sz = 0;
 
 typedef struct {
@@ -94,6 +99,20 @@ extern int recvSync(int usbfd, void *data, size_t len, unsigned timeout){
     return rc;
 }
 
+#define KVERSION(j,n,p) ((j)*1000000 + (n)*1000 + (p))
+static struct utsname utsname;  /* for the kernel version */
+static int ql_get_kernel_version(void)
+{
+    int osmaj, osmin, ospatch;
+    int kernel_version;
+
+    uname(&utsname);
+    osmaj = osmin = ospatch = 0;
+    sscanf(utsname.release, "%d.%d.%d", &osmaj, &osmin, &ospatch);
+    kernel_version = KVERSION(osmaj, osmin, ospatch);
+
+    return kernel_version;
+}
 
 #define bsl_exec(_c) do{if (_c) {dprintf("failed: %s (%s: %s: %d)\n", #_c, __FILE__, __func__, __LINE__); return -1;}} while(0)
 
@@ -338,7 +357,7 @@ static BSL_CMD_T * bsl_read_cmd(pac_ctx_t *ctx, unsigned timeout)
             uint32_t need_len = (be16toh(bsl_rsp->len) + 1 + 2 + 2 + 2 + 1);
             uint32_t read_len = ret;
 
-            if (uix8910 && (skip_7d == 0)) {
+            if ((uix8910 || uic8850 || uic8310) && (skip_7d == 0)) {
                     uint8_t *data = (uint8_t *)bsl_rsp;
                     uint32_t i, cnt_7d = 0;
 
@@ -346,7 +365,7 @@ static BSL_CMD_T * bsl_read_cmd(pac_ctx_t *ctx, unsigned timeout)
                         if (data[i] == 0x7d) cnt_7d++;
                     }
 
-                    while ((read_len < (need_len + cnt_7d)) && (ret == 128 || ret == 129)) {
+                    while ((read_len < (need_len + cnt_7d)) /*&& (ret == 128 || ret == 129)*/) {
                         ret = recvSync(ctx->usbfd, data + read_len, sizeof(ctx->bsl_rsp_data), 1000);
                         if (ret > 0) {
                             for (i = 0; i < ret; i++) {
@@ -463,7 +482,9 @@ static int bsl_change_baud(pac_ctx_t *ctx) {
 
 
 static int FileisNV(Scheme_t *File) {
-    if (uix8910)
+    if (uix8910 || uic8850)
+        return (!strcasecmp(File->FileID, "NV"));
+    else if (uic8310)
         return (!strcasecmp(File->FileID, "NV"));
 
     return (!strcasecmp(File->FileID, "NV_NR"));
@@ -484,6 +505,12 @@ static int bsl_flash_id(pac_ctx_t *ctx, Scheme_t *File) {
     if (!strcasecmp(File->FileID, "AP") || !strcasecmp(File->FileID, "PS"))
         return 0;
 #endif
+
+    if (uic8850 && !strcasecmp(File->FileID, "NV"))
+        frame_sz = FRAMESZ_PDL;
+
+    if (uic8310 && !strcasecmp(File->FileID, "NV"))
+        frame_sz = FRAMESZ_PDL;
 
     bsl_cmd_reset(bsl_req, BSL_CMD_START_DATA);
 
@@ -542,7 +569,7 @@ static int bsl_flash_id(pac_ctx_t *ctx, Scheme_t *File) {
             ret = fileSize - curSize;
             if (ret > frame_sz)
                 ret = frame_sz;
-            memcpy(bsl_req->data,  File->nv_buf + curSize, frame_sz);
+            memcpy(bsl_req->data,  File->nv_buf + curSize, ret);
         }
         else if (File->backup_fp) {
             ret = fread(bsl_req->data, 1, frame_sz, File->backup_fp);
@@ -574,8 +601,8 @@ static int bsl_flash_id(pac_ctx_t *ctx, Scheme_t *File) {
         if (ret <= 0) break;
         if (nv_crc && (curSize == 0))
             *((uint16_t *)(bsl_req->data)) = htobe16(crc16);
-        if ((ret&1) == 1)
-            bsl_req->data[ret++] = 0;
+    if ((ret&1) == 1)
+        bsl_req->data[ret++] = 0;
 
         bsl_req->len = htobe16(ret);
         bsl_cmd_add_crc16(bsl_req, use_crc16BootCode);
@@ -631,10 +658,12 @@ static int bsl_backup_id(pac_ctx_t *ctx, Scheme_t *File) {
     curSize = 0;
     while (curSize < fileSize)
     {
-        if (uix8910) {
+        if (uix8910 || uic8850 || uic8310) {
             bsl_cmd_reset(bsl_req, BSL_CMD_READ_FLASH);
             bsl_cmd_add_be32(bsl_req, strtoul(File->Base, NULL, 16));
-            bsl_cmd_add_be32(bsl_req, min(FRAMESZ_DATA, fileSize - curSize));
+            if (uix8910 || uic8850 || uic8310)
+                bsl_cmd_add_be32(bsl_req, min(FRAMESZ_DATA, fileSize - curSize));
+
             bsl_cmd_add_be32(bsl_req, curSize);
             bsl_cmd_add_crc16(bsl_req, 0);
         }
@@ -722,7 +751,10 @@ static int bsl_erase_id(pac_ctx_t *ctx, Scheme_t *File) {
     }
     bsl_cmd_add_crc16(bsl_req, 0);
 
-    bsl_exec(bsl_send_cmd_wait_ack(ctx, bsl_req, 0, 0));
+    if (q_erase_all)
+        bsl_exec(bsl_send_cmd_wait_ack(ctx, bsl_req, 0, 30000));  //erase all need at least 22 seconds
+    else
+        bsl_exec(bsl_send_cmd_wait_ack(ctx, bsl_req, 0, 0));
 
     return 0;
 }
@@ -754,6 +786,18 @@ static int  test_bsl(pac_ctx_t *ctx ) {
         Scheme_t *x = &ctx->SchemeList[i];
         Scheme_t *bx;
 
+        if (q_erase_all && uix8910 && erase_all_once)    //erass all
+        {
+            Scheme_t x_tmp;
+            memset(&x_tmp, 0, sizeof(Scheme_t));
+            snprintf(x_tmp.Base, sizeof(x->Base), "0x%08x", 0x00000000);
+            snprintf(x_tmp.Size, sizeof(x->Base), "0x%08x", 0xffffffff);
+
+            bsl_exec(bsl_erase_id(ctx, &x_tmp));
+            bsl_exec(bsl_send_cmd_wait_ack(ctx, NULL, BSL_CMD_REPARTITION, 0));
+            erase_all_once = 0;
+        }
+
         if (!strcasecmp(x->FileID, "HOST_FDL")) {
             frame_sz = FRAMESZ_PDL;
             pdl_send_cmd_wait_ack(ctx, NULL, PDL_CMD_CONNECT, 1000);
@@ -768,8 +812,18 @@ static int  test_bsl(pac_ctx_t *ctx ) {
             bsl_exec(bsl_flash_id(ctx, x));
             bsl_exec(bsl_send_cmd_wait_ack(ctx, NULL, BSL_CMD_EXEC_DATA, 0));
             use_crc16BootCode = 0;
+
+            if (uic8850)
+            {
+                int tmp = ql_get_kernel_version();
+                if (tmp <= KVERSION(3,2,102))
+                    frame_sz = 0x3c00;
+                else
+                    frame_sz = FRAMESZ_OUT_DATA;
+            }
         }
         else if (!strcasecmp(x->FileID, "FDL2")) {
+            erase_all_once = 1;
             frame_sz = FRAMESZ_FDL;
             bsl_exec(bsl_check_baud(ctx));
             bsl_exec(bsl_send_cmd_wait_ack(ctx, NULL, BSL_CMD_CONNECT, 0));
@@ -785,13 +839,19 @@ static int  test_bsl(pac_ctx_t *ctx ) {
             if (uix8910)
             frame_sz = FRAMESZ_PDL;
             else
-            frame_sz = FRAMESZ_OUT_DATA;
+            {
+                int tmp = ql_get_kernel_version();
+                if (tmp <= KVERSION(3,2,102))
+                    frame_sz = 0x3c00;
+                else
+                    frame_sz = FRAMESZ_OUT_DATA;
+            }
 
             for (j = i; j < ctx->SchemeNum; j++) {
                 bx = &ctx->SchemeList[j];
 
-                if (uix8910) {
-                    if (!strcasecmp(bx->FileID, "NV")) {
+                if (uix8910 || uic8310) {
+                    if (!strcasecmp(bx->FileID, "NV") && !q_erase_all) {
                         bx->backup[0] = '1';
                     }
                 }
@@ -801,6 +861,7 @@ static int  test_bsl(pac_ctx_t *ctx ) {
                     bsl_exec(bsl_backup_id(ctx, bx));
             }
 
+            #if 0
             if (udx710)
                 bsl_exec(bsl_re_parttition(ctx));
 
@@ -812,41 +873,108 @@ static int  test_bsl(pac_ctx_t *ctx ) {
                         bsl_exec(bsl_flash_id(ctx, bx));
                 }
             }
+            #endif
         }
         else if (x->backup[0] == '1' && udx710 == 1) {
         }
         else if (x->CheckFlag[0] == '0' && udx710 == 1) {
             dprintf("skip download FileID: %s\n", x->FileID);
         }
-        else if (uix8910 && strcmp(x->FileID,"ERASE_BOOT") == 0) {
-            bsl_exec(bsl_erase_id(ctx, x));   
-		}
+        else if (uic8310 && strncmp(x->FileID,"Erase BOOT0",11) == 0) {
+            dprintf("into FileID: %s\n", x->FileID);
+            bsl_exec(bsl_erase_id(ctx, x));
+        }
+        else if (uix8910 && (strcmp(x->FileID,"ERASE_BOOT") == 0 || strcmp(x->FileID,"ERASE_PY_FS_U") == 0
+            || strcmp(x->FileID,"ERASE_PY_FS_B") == 0)) {
+            bsl_exec(bsl_erase_id(ctx, x));
+        }
+        else if (uic8850 && strcmp(x->FileID,"ERASE_SPL") == 0)
+        {
+            bsl_exec(bsl_check_baud(ctx));
+            bsl_exec(bsl_send_cmd_wait_ack(ctx, NULL, BSL_CMD_CONNECT, 0));
+            bsl_exec(bsl_erase_id(ctx, x));
+
+            for (j = i; j < ctx->SchemeNum; j++) {
+                bx = &ctx->SchemeList[j];
+
+                if (uic8850) {
+                    if (!strcasecmp(bx->FileID, "NV") && !q_erase_all) {
+                        bx->backup[0] = '1';   //default is 0
+                    }
+                }
+
+                //bx->backup[0] = '0';
+                if (bx->backup[0] == '1')
+                    bsl_exec(bsl_backup_id(ctx, bx));
+            }
+        }
+        else if (uic8850 && (!strcasecmp(x->FileID, "BOOT") || !strcasecmp(x->FileID, "PhaseCheck")
+              || !strcasecmp(x->FileID, "FMT_FSEXT") || !strcasecmp(x->FileID, "FMT_FSSYS"))) {
+            dprintf("skip FileID: %s\n", x->FileID);
+        }
+        else if (uic8310 && (!strcasecmp(x->FileID, "BOOT") || !strcasecmp(x->FileID, "EraseUserNV") || !strcasecmp(x->FileID, "EraseRunNV"))) {
+            bsl_exec(bsl_erase_id(ctx, x));
+        }
+        else if (uic8310 && (!strcasecmp(x->FileID, "XFILE") || !strcasecmp(x->FileID, "AUTOSMS")
+            || !strcasecmp(x->FileID, "OmadmFota") || !strcasecmp(x->FileID, "Preload")
+            || !strcasecmp(x->FileID, "GPS_GL") || !strcasecmp(x->FileID, "GPS_BD")
+            || !strcasecmp(x->FileID, "GPS_FDL") || !strcasecmp(x->FileID, "WCNCODE")
+            || !strcasecmp(x->FileID, "RomDisk") || !strcasecmp(x->FileID, "APN")
+            || !strncmp(x->FileID, "ERASE HIDDEN_DISK_C", 19) || !strncmp(x->FileID, "Erase QUEC_NV", 13)
+            || !strcasecmp(x->FileID, "PhaseCheck") || !strcasecmp(x->FileID, "PreloadUdisk")
+            || !strncmp(x->FileID, "Erase FS", 8))) {
+            dprintf("skip FileID: %s\n", x->FileID);
+        }
+        else if (uic8310 && !strcasecmp(x->FileID, "FotaUpdate")) {
+            bsl_exec(bsl_flash_id(ctx, x));
+        }
         else if (x->image && x->image->szFileName[0]) {
             bsl_exec(bsl_flash_id(ctx, x));
         }
         else if (uix8910 && !strcasecmp(x->FileID, "FMT_FSSYS")) {
             //dprintf("Unknow FileID: %s\n", x->FileID);
         }
+        else if (uic8850 && (!strcasecmp(x->FileID, "FMT_FSMOD") || !strcasecmp(x->FileID, "FLASH"))) {
+            bsl_exec(bsl_erase_id(ctx, x));
+        }
+        else if (uix8910 && !strcasecmp(x->FileID, "FMT_FSEXT")) {
+            //dprintf("Unknow FileID: %s\n", x->FileID);
+        }
         else if (!strcasecmp(x->Type, "EraseFlash2"))
         {
             bsl_exec(bsl_erase_id(ctx, x));
+
+            #if 1
+            if (udx710)
+                bsl_exec(bsl_re_parttition(ctx));
+
+            if (udx710 == 1)
+            {
+                int SchemeNum = ctx->SchemeNum;
+                for (SchemeNum--; SchemeNum > i; SchemeNum--) {
+                    bx  = &ctx->SchemeList[SchemeNum];
+                    if (bx->backup[0] == '1')
+                        bsl_exec(bsl_flash_id(ctx, bx));
+                }
+            }
+            #endif
         }
         else {
             if (uix8910) {
                 if (!strcasecmp(x->FileID, "PhaseCheck") && !strcasecmp(x->Type, "CODE")) {
                /*
-			<File>
-				<ID>PhaseCheck</ID>
-				<IDAlias>PhaseCheck</IDAlias>
-				<Type>CODE</Type>
-				<Block>
-					<Base>0xfe000002</Base>
-					<Size>0x100</Size>
-				</Block>
-				<Flag>0</Flag>
-				<CheckFlag>0</CheckFlag>
-				<Description>Producting phases information section</Description>
-			</File>
+            <File>
+                <ID>PhaseCheck</ID>
+                <IDAlias>PhaseCheck</IDAlias>
+                <Type>CODE</Type>
+                <Block>
+                    <Base>0xfe000002</Base>
+                    <Size>0x100</Size>
+                </Block>
+                <Flag>0</Flag>
+                <CheckFlag>0</CheckFlag>
+                <Description>Producting phases information section</Description>
+            </File>
                  */
                      continue;
                 }
@@ -856,8 +984,11 @@ static int  test_bsl(pac_ctx_t *ctx ) {
                 }
             }
 
-            dprintf("Unknow FileID: %s\n", x->FileID);
-            return -1;
+            if (!uix8910)     //unisoc 8910 No longer check Unknow FileID
+            {
+                dprintf("Unknow FileID: %s\n", x->FileID);
+                return -1;
+            }
         }
     }
 
@@ -888,13 +1019,15 @@ int dloader_main(int usbfd, FILE *fw_fp)
 
     if(CHK_NAME("710") || CHK_VERSION("710")) udx710 = 1;
     else if(CHK_NAME("8910") || CHK_VERSION("8910")) uix8910 = 1;
+    else if(CHK_NAME("8850") || CHK_VERSION("8850")) uic8850 = 1;
+    else if(CHK_NAME("8310") || CHK_VERSION("8310")) uic8310 = 1;
     else{
         ret = -2;
         dprintf("invalid modem\r\n");
         goto out;
     }
 
-    dprintf("udx710: %d, uix8910: %d\r\n", udx710, uix8910);
+    dprintf("udx710: %d, uix8910: %d, uic8850: %d, uic8310: %d\r\n", udx710, uix8910, uic8850, uic8310);
 
     ret = test_bsl(ctx);
 out:

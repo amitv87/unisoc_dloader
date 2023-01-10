@@ -4,7 +4,7 @@
 #define FRAMESZ_PDL 0x800      // frame size for PDL
 #define FRAMESZ_FDL 0x840      // frame size for fdl1
 #define FRAMESZ_DATA 0x3000    // frame size for others
-#define FRAMESZ_OUT_DATA 0xfc00    // windows use this value
+#define FRAMESZ_OUT_DATA 0xfc00    // windows use 0xfc00£¬Linux use 0x3c00
 
 struct bin_header_t
 {
@@ -106,9 +106,9 @@ typedef enum
     BSL_CMD_READ_MIDST = 0x11,
     BSL_CMD_END_READ = 0x12,
     BSL_CMD_EXEC_NAND_INIT = 0x21,
-    BSL_CMD_DISABLE_TRANSCODE	= 0x21,		/* 0x21 Use the non-escape function */
-    BSL_CMD_WRITE_APR_INFO		= 0x22,		/* 0x22 Write pac file build time to miscdata for APR */
-    BSL_CMD_ENABLE_DEBUG_MODE	= 0x25,		/* 0x25 Enable debug mode */
+    BSL_CMD_DISABLE_TRANSCODE   = 0x21,     /* 0x21 Use the non-escape function */
+    BSL_CMD_WRITE_APR_INFO      = 0x22,     /* 0x22 Write pac file build time to miscdata for APR */
+    BSL_CMD_ENABLE_DEBUG_MODE   = 0x25,     /* 0x25 Enable debug mode */
 
     BSL_REP_ACK = 0x80,
     BSL_REP_VER = 0x81,

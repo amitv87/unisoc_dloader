@@ -99,15 +99,17 @@ int pac_read_bin(pac_ctx_t *ctx, void *pBuf, size_t nSize) {
 }
 
 /*
-			<NVBackup backup="1">
-				<NVItem name="License" backup="1">
-					<ID>0x1BF</ID>
-					<BackupFlag use="1">
-						<NVFlag name="Continue" check="0"></NVFlag>
-					</BackupFlag>
-				</NVItem>
-			</NVBackup>
+            <NVBackup backup="1">
+                <NVItem name="License" backup="1">
+                    <ID>0x1BF</ID>
+                    <BackupFlag use="1">
+                        <NVFlag name="Continue" check="0"></NVFlag>
+                    </BackupFlag>
+                </NVItem>
+            </NVBackup>
 */
+
+int iemi2_in_backupList = 0;
 int xml_parse_NVBackup(pac_ctx_t *ctx, const char *xml_s, const char *xml_e) {
     const char *p, *pNVItem;
     size_t n, nNVItem;
@@ -126,10 +128,14 @@ int xml_parse_NVBackup(pac_ctx_t *ctx, const char *xml_s, const char *xml_e) {
         if (NVid < 0xfffe) {
             if (verbose > 0) dprintf("NVBackup[%d] %0x\n", ctx->NVBackupNum, NVid);
             ctx->NVBackupList[ctx->NVBackupNum++] = NVid;
+            if (NVid == 377 && udx710)
+                iemi2_in_backupList = 1;
         }
     }
 
 out:
+    if (!iemi2_in_backupList && udx710)
+        ctx->NVBackupList[ctx->NVBackupNum++] = 377;
     return 0;
 }
 
