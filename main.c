@@ -510,7 +510,7 @@ static int bsl_flash_id(pac_ctx_t *ctx, Scheme_t *File) {
     uint16_t crc16 = 0;
     int nv_crc = FileisNV(File);
 
-    dprintf("%-8s %s\n",  "Flash", File->FileID);
+    dprintf("%-8s %s %s\n",  "Flash", File->FileID, (char*)File->image->szFileName);
 
 #if 0 //for reduce test time
     if (!strcasecmp(File->FileID, "AP") || !strcasecmp(File->FileID, "PS"))
@@ -645,7 +645,7 @@ static int bsl_backup_id(pac_ctx_t *ctx, Scheme_t *File) {
     BSL_CMD_T *bsl_req = ctx->bsl_req;
     BSL_CMD_T *bsl_rsp;
     FILE *fp = NULL;
-    char *backup_dir = "/tmp";
+    char *backup_dir = ".";
     char backup_file[256];
     int nv_crc = FileisNV(File);
 
@@ -653,7 +653,7 @@ static int bsl_backup_id(pac_ctx_t *ctx, Scheme_t *File) {
         backup_dir = "/data";
     if (access(backup_dir, W_OK) && errno == ENOENT)
         backup_dir = "/cache";
-    snprintf(backup_file, sizeof(backup_file), "%s/quectel_back_%s", backup_dir, File->FileID);
+    snprintf(backup_file, sizeof(backup_file), "%s/backup_%s", backup_dir, File->FileID);
     dprintf("%-8s %s -> '%s'\n", "Backup", File->FileID, backup_file);
 
     fileSize = strtoul(File->Size, NULL, 16);
@@ -791,6 +791,8 @@ static int bsl_re_parttition(pac_ctx_t *ctx) {
 
 static int  test_bsl(pac_ctx_t *ctx ) {
     unsigned i, j;
+    int is_spl_erased = 0;
+    Scheme_t* spl_scheme = NULL;
 
     for (i = 0; i < ctx->SchemeNum; i++)
     {
@@ -832,12 +834,12 @@ static int  test_bsl(pac_ctx_t *ctx ) {
                 else
                     frame_sz = FRAMESZ_OUT_DATA;
             }
+            bsl_exec(bsl_check_baud(ctx));
+            bsl_exec(bsl_send_cmd_wait_ack(ctx, NULL, BSL_CMD_CONNECT, 0));
         }
         else if (!strcasecmp(x->FileID, "FDL2")) {
             erase_all_once = 1;
             frame_sz = FRAMESZ_FDL;
-            bsl_exec(bsl_check_baud(ctx));
-            bsl_exec(bsl_send_cmd_wait_ack(ctx, NULL, BSL_CMD_CONNECT, 0));
             if (uix8910)
                 bsl_exec(bsl_change_baud(ctx));
             bsl_exec(bsl_flash_id(ctx, x));
@@ -901,8 +903,9 @@ static int  test_bsl(pac_ctx_t *ctx ) {
         }
         else if (uic8850 && strcmp(x->FileID,"ERASE_SPL") == 0)
         {
-            bsl_exec(bsl_check_baud(ctx));
-            bsl_exec(bsl_send_cmd_wait_ack(ctx, NULL, BSL_CMD_CONNECT, 0));
+            erase_spl:
+            if(is_spl_erased) continue;
+            is_spl_erased = 1;
             bsl_exec(bsl_erase_id(ctx, x));
 
             for (j = i; j < ctx->SchemeNum; j++) {
@@ -940,6 +943,10 @@ static int  test_bsl(pac_ctx_t *ctx ) {
             bsl_exec(bsl_flash_id(ctx, x));
         }
         else if (x->image && x->image->szFileName[0]) {
+            if(uic8850 && !strcasecmp(x->FileID, "SPL") && !is_spl_erased){
+                spl_scheme = x;
+                goto erase_spl;
+            }
             bsl_exec(bsl_flash_id(ctx, x));
         }
         else if (uix8910 && !strcasecmp(x->FileID, "FMT_FSSYS")) {
@@ -1001,6 +1008,11 @@ static int  test_bsl(pac_ctx_t *ctx ) {
                 return -1;
             }
         }
+    }
+
+    if(spl_scheme){
+        bsl_exec(bsl_flash_id(ctx, spl_scheme));
+        spl_scheme = NULL;
     }
 
     if(last_resp != BSL_REP_DOWN_EARLY_END)
